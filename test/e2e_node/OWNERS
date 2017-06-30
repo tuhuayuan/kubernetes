@@ -1,4 +1,7 @@
-assignees:
-  - pwittrock
-  - vishh
-  - timstclair
+approvers:
+- Random-Liu
+- timstclair
+- vishh
+- derekwaynecarr
+reviewers:
+- sig-node-reviewers

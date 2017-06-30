@@ -17,59 +17,66 @@ limitations under the License.
 package cmd
 
 import (
+	"fmt"
 	"io"
 
-	"github.com/renstrom/dedent"
 	"github.com/spf13/cobra"
 
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/apimachinery/registered"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/kubectl"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	"k8s.io/kubernetes/pkg/util/i18n"
 )
 
 var (
-	explainExamples = dedent.Dedent(`
+	explainLong = templates.LongDesc(`
+		Documentation of resources.
+
+		` + validResources)
+
+	explainExamples = templates.Examples(i18n.T(`
 		# Get the documentation of the resource and its fields
 		kubectl explain pods
 
 		# Get the documentation of a specific field of a resource
-		kubectl explain pods.spec.containers`)
-
-	explainLong = dedent.Dedent(`
-		Documentation of resources.
-
-		`) + kubectl.PossibleResourceTypes
+		kubectl explain pods.spec.containers`))
 )
 
 // NewCmdExplain returns a cobra command for swagger docs
-func NewCmdExplain(f *cmdutil.Factory, out io.Writer) *cobra.Command {
+func NewCmdExplain(f cmdutil.Factory, out, cmdErr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "explain RESOURCE",
-		Short:   "Documentation of resources",
+		Short:   i18n.T("Documentation of resources"),
 		Long:    explainLong,
 		Example: explainExamples,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := RunExplain(f, out, cmd, args)
+			err := RunExplain(f, out, cmdErr, cmd, args)
 			cmdutil.CheckErr(err)
 		},
 	}
 	cmd.Flags().Bool("recursive", false, "Print the fields of fields (Currently only 1 level deep)")
+	cmd.Flags().String("api-version", "", "Get different explanations for particular API version")
 	cmdutil.AddInclude3rdPartyFlags(cmd)
 	return cmd
 }
 
 // RunExplain executes the appropriate steps to print a model's documentation
-func RunExplain(f *cmdutil.Factory, out io.Writer, cmd *cobra.Command, args []string) error {
-	if len(args) != 1 {
-		return cmdutil.UsageError(cmd, "We accept only this format: explain RESOURCE")
+func RunExplain(f cmdutil.Factory, out, cmdErr io.Writer, cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		fmt.Fprint(cmdErr, "You must specify the type of resource to explain. ", validResources)
+		return cmdutil.UsageErrorf(cmd, "Required resource not specified.")
+	}
+	if len(args) > 1 {
+		return cmdutil.UsageErrorf(cmd, "We accept only this format: explain RESOURCE")
 	}
 
 	recursive := cmdutil.GetFlagBool(cmd, "recursive")
 	apiVersionString := cmdutil.GetFlagString(cmd, "api-version")
-	apiVersion := unversioned.GroupVersion{}
+	apiVersion := schema.GroupVersion{}
 
-	mapper, _ := f.Object(cmdutil.GetIncludeThirdPartyAPIs(cmd))
+	mapper, _ := f.Object()
 	// TODO: After we figured out the new syntax to separate group and resource, allow
 	// the users to use it in explain (kubectl explain <group><syntax><resource>).
 	// Refer to issue #16039 for why we do this. Refer to PR #15808 that used "/" syntax.
@@ -79,12 +86,12 @@ func RunExplain(f *cmdutil.Factory, out io.Writer, cmd *cobra.Command, args []st
 	}
 
 	// TODO: We should deduce the group for a resource by discovering the supported resources at server.
-	fullySpecifiedGVR, groupResource := unversioned.ParseResourceArg(inModel)
-	gvk := unversioned.GroupVersionKind{}
+	fullySpecifiedGVR, groupResource := schema.ParseResourceArg(inModel)
+	gvk := schema.GroupVersionKind{}
 	if fullySpecifiedGVR != nil {
 		gvk, _ = mapper.KindFor(*fullySpecifiedGVR)
 	}
-	if gvk.IsEmpty() {
+	if gvk.Empty() {
 		gvk, err = mapper.KindFor(groupResource.WithVersion(""))
 		if err != nil {
 			return err
@@ -92,14 +99,14 @@ func RunExplain(f *cmdutil.Factory, out io.Writer, cmd *cobra.Command, args []st
 	}
 
 	if len(apiVersionString) == 0 {
-		groupMeta, err := registered.Group(gvk.Group)
+		groupMeta, err := api.Registry.Group(gvk.Group)
 		if err != nil {
 			return err
 		}
 		apiVersion = groupMeta.GroupVersion
 
 	} else {
-		apiVersion, err = unversioned.ParseGroupVersion(apiVersionString)
+		apiVersion, err = schema.ParseGroupVersion(apiVersionString)
 		if err != nil {
 			return nil
 		}

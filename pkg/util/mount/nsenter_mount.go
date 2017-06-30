@@ -175,7 +175,7 @@ func (n *NsenterMounter) IsLikelyNotMountPoint(file string) (bool, error) {
 		glog.V(5).Infof("findmnt: directory %s does not exist", file)
 		return true, err
 	}
-	// Add --first-only option: since we are testing for the absense of a mountpoint, it is sufficient to get only
+	// Add --first-only option: since we are testing for the absence of a mountpoint, it is sufficient to get only
 	// the first of multiple possible mountpoints using --first-only.
 	// Also add fstype output to make sure that the output of target file will give the full path
 	// TODO: Need more refactoring for this function. Track the solution with issue #26996
@@ -215,6 +215,11 @@ func (n *NsenterMounter) DeviceOpened(pathname string) (bool, error) {
 // to a device.
 func (n *NsenterMounter) PathIsDevice(pathname string) (bool, error) {
 	return pathIsDevice(pathname)
+}
+
+//GetDeviceNameFromMount given a mount point, find the volume id from checking /proc/mounts
+func (n *NsenterMounter) GetDeviceNameFromMount(mountPath, pluginDir string) (string, error) {
+	return getDeviceNameFromMount(n, mountPath, pluginDir)
 }
 
 func (n *NsenterMounter) absHostPath(command string) string {

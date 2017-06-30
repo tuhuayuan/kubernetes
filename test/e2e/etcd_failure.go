@@ -19,10 +19,13 @@ package e2e
 import (
 	"time"
 
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/labels"
-	"k8s.io/kubernetes/pkg/util/wait"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/wait"
+	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/workload"
+	testutils "k8s.io/kubernetes/test/utils"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -40,11 +43,11 @@ var _ = framework.KubeDescribe("Etcd failure [Disruptive]", func() {
 		// providers that provide those capabilities.
 		framework.SkipUnlessProviderIs("gce")
 
-		Expect(framework.RunRC(framework.RCConfig{
-			Client:    f.Client,
+		Expect(framework.RunRC(testutils.RCConfig{
+			Client:    f.ClientSet,
 			Name:      "baz",
 			Namespace: f.Namespace.Name,
-			Image:     framework.GetPauseImageName(f.Client),
+			Image:     framework.GetPauseImageName(f.ClientSet),
 			Replicas:  1,
 		})).NotTo(HaveOccurred())
 	})
@@ -52,8 +55,8 @@ var _ = framework.KubeDescribe("Etcd failure [Disruptive]", func() {
 	It("should recover from network partition with master", func() {
 		etcdFailTest(
 			f,
-			"sudo iptables -A INPUT -p tcp --destination-port 4001 -j DROP",
-			"sudo iptables -D INPUT -p tcp --destination-port 4001 -j DROP",
+			"sudo iptables -A INPUT -p tcp --destination-port 2379 -j DROP",
+			"sudo iptables -D INPUT -p tcp --destination-port 2379 -j DROP",
 		)
 	})
 
@@ -71,7 +74,7 @@ func etcdFailTest(f *framework.Framework, failCommand, fixCommand string) {
 
 	checkExistingRCRecovers(f)
 
-	ServeImageOrFail(f, "basic", "gcr.io/google_containers/serve_hostname:v1.4")
+	workload.TestReplicationControllerServeImageOrFail(f, "basic", framework.ServeHostnameImage)
 }
 
 // For this duration, etcd will be failed by executing a failCommand on the master.
@@ -100,12 +103,12 @@ func masterExec(cmd string) {
 
 func checkExistingRCRecovers(f *framework.Framework) {
 	By("assert that the pre-existing replication controller recovers")
-	podClient := f.Client.Pods(f.Namespace.Name)
+	podClient := f.ClientSet.Core().Pods(f.Namespace.Name)
 	rcSelector := labels.Set{"name": "baz"}.AsSelector()
 
 	By("deleting pods from existing replication controller")
 	framework.ExpectNoError(wait.Poll(time.Millisecond*500, time.Second*60, func() (bool, error) {
-		options := api.ListOptions{LabelSelector: rcSelector}
+		options := metav1.ListOptions{LabelSelector: rcSelector.String()}
 		pods, err := podClient.List(options)
 		if err != nil {
 			framework.Logf("apiserver returned error, as expected before recovery: %v", err)
@@ -115,7 +118,7 @@ func checkExistingRCRecovers(f *framework.Framework) {
 			return false, nil
 		}
 		for _, pod := range pods.Items {
-			err = podClient.Delete(pod.Name, api.NewDeleteOptions(0))
+			err = podClient.Delete(pod.Name, metav1.NewDeleteOptions(0))
 			Expect(err).NotTo(HaveOccurred())
 		}
 		framework.Logf("apiserver has recovered")
@@ -124,11 +127,11 @@ func checkExistingRCRecovers(f *framework.Framework) {
 
 	By("waiting for replication controller to recover")
 	framework.ExpectNoError(wait.Poll(time.Millisecond*500, time.Second*60, func() (bool, error) {
-		options := api.ListOptions{LabelSelector: rcSelector}
+		options := metav1.ListOptions{LabelSelector: rcSelector.String()}
 		pods, err := podClient.List(options)
 		Expect(err).NotTo(HaveOccurred())
 		for _, pod := range pods.Items {
-			if pod.DeletionTimestamp == nil && api.IsPodReady(&pod) {
+			if pod.DeletionTimestamp == nil && podutil.IsPodReady(&pod) {
 				return true, nil
 			}
 		}

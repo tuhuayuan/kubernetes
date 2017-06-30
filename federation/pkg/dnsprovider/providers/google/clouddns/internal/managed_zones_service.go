@@ -20,11 +20,11 @@ import (
 	"strings"
 
 	dns "google.golang.org/api/dns/v1"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/kubernetes/federation/pkg/dnsprovider/providers/google/clouddns/internal/interfaces"
-	"k8s.io/kubernetes/pkg/util"
 )
 
-// Compile time check for interface adeherence
+// Compile time check for interface adherence
 var _ interfaces.ManagedZonesService = &ManagedZonesService{}
 
 type ManagedZonesService struct{ impl *dns.ManagedZonesService }
@@ -46,6 +46,6 @@ func (m *ManagedZonesService) List(project string) interfaces.ManagedZonesListCa
 }
 
 func (m *ManagedZonesService) NewManagedZone(dnsName string) interfaces.ManagedZone {
-	name := "x" + strings.Replace(string(util.NewUUID()), "-", "", -1)[0:30] // Unique name, strip out the "-" chars to shorten it, start with a lower case alpha, and truncate to Cloud DNS 32 character limit
+	name := "x" + strings.Replace(string(uuid.NewUUID()), "-", "", -1)[0:30] // Unique name, strip out the "-" chars to shorten it, start with a lower case alpha, and truncate to Cloud DNS 32 character limit
 	return &ManagedZone{impl: &dns.ManagedZone{Name: name, Description: "Kubernetes Federated Service", DnsName: dnsName}}
 }

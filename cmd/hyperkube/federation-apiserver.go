@@ -17,20 +17,21 @@ limitations under the License.
 package main
 
 import (
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/federation/cmd/federation-apiserver/app"
-	genericoptions "k8s.io/kubernetes/pkg/genericapiserver/options"
+	"k8s.io/kubernetes/federation/cmd/federation-apiserver/app/options"
 )
 
 // NewFederationAPIServer creates a new hyperkube Server object that includes the
 // description and flags.
 func NewFederationAPIServer() *Server {
-	s := genericoptions.NewServerRunOptions()
+	s := options.NewServerRunOptions()
 
 	hks := Server{
 		SimpleUsage: "federation-apiserver",
 		Long:        "The API entrypoint for the federation control plane",
 		Run: func(_ *Server, args []string) error {
-			return app.Run(s)
+			return app.Run(s, wait.NeverStop)
 		},
 	}
 	s.AddFlags(hks.Flags())

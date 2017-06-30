@@ -27,11 +27,11 @@ import (
 
 	"github.com/golang/glog"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apiserver/pkg/authorization/authorizer"
 	api "k8s.io/kubernetes/pkg/apis/abac"
 	_ "k8s.io/kubernetes/pkg/apis/abac/latest"
 	"k8s.io/kubernetes/pkg/apis/abac/v0"
-	"k8s.io/kubernetes/pkg/auth/authorizer"
-	"k8s.io/kubernetes/pkg/runtime"
 )
 
 type policyLoadError struct {
@@ -89,7 +89,7 @@ func NewFromFile(path string) (policyList, error) {
 			if err := runtime.DecodeInto(decoder, b, oldPolicy); err != nil {
 				return nil, policyLoadError{path, i, b, err}
 			}
-			if err := api.Scheme.Convert(oldPolicy, p); err != nil {
+			if err := api.Scheme.Convert(oldPolicy, p, nil); err != nil {
 				return nil, policyLoadError{path, i, b, err}
 			}
 			pl = append(pl, p)
@@ -104,7 +104,7 @@ func NewFromFile(path string) (policyList, error) {
 	}
 
 	if unversionedLines > 0 {
-		glog.Warningf(`Policy file %s contained unversioned rules. See docs/admin/authorization.md#abac-mode for ABAC file format details.`, path)
+		glog.Warningf("Policy file %s contained unversioned rules. See docs/admin/authorization.md#abac-mode for ABAC file format details.", path)
 	}
 
 	if err := scanner.Err(); err != nil {

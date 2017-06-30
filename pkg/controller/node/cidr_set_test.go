@@ -17,11 +17,12 @@ limitations under the License.
 package node
 
 import (
-	"github.com/golang/glog"
 	"math/big"
 	"net"
 	"reflect"
 	"testing"
+
+	"github.com/golang/glog"
 )
 
 func TestCIDRSetFullyAllocated(t *testing.T) {
@@ -248,7 +249,7 @@ func TestOccupy(t *testing.T) {
 			subNetMaskSize:    16,
 			subNetCIDRStr:     "127.0.0.0/8",
 			expectedUsedBegin: 0,
-			expectedUsedEnd:   256,
+			expectedUsedEnd:   255,
 			expectErr:         false,
 		},
 		{
@@ -256,7 +257,7 @@ func TestOccupy(t *testing.T) {
 			subNetMaskSize:    16,
 			subNetCIDRStr:     "127.0.0.0/2",
 			expectedUsedBegin: 0,
-			expectedUsedEnd:   256,
+			expectedUsedEnd:   255,
 			expectErr:         false,
 		},
 		{

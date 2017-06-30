@@ -28,21 +28,29 @@ if [[ -z "${1:-}" ]]; then
 fi
 CACHE="$1"; shift
 
+trap "rm -f '${CACHE}'" HUP INT TERM ERR
+
 # This is a partial 'find' command.  The caller is expected to pass the
 # remaining arguments.
 #
 # Example:
 #   kfind -type f -name foobar.go
 function kfind() {
-    find .                         \
+    # include the "special" vendor directories which are actually part
+    # of the Kubernetes source tree - generators will use these for
+    # including certain core API concepts.
+    find -H . ./vendor/k8s.io/apimachinery ./vendor/k8s.io/apiserver ./vendor/k8s.io/kube-aggregator ./vendor/k8s.io/apiextensions-apiserver ./vendor/k8s.io/metrics ./vendor/k8s.io/sample-apiserver ./vendor/k8s.io/api \
+        \(                         \
         -not \(                    \
             \(                     \
                 -path ./vendor -o  \
+                -path ./staging -o \
                 -path ./_\* -o     \
                 -path ./.\* -o     \
                 -path ./docs -o    \
                 -path ./examples   \
             \) -prune              \
+        \)                         \
         \)                         \
         "$@"
 }
@@ -57,9 +65,9 @@ fi
 mkdir -p $(dirname "${CACHE}")
 if $("${NEED_FIND}"); then
     kfind -type f -name \*.go  \
-        | xargs -n1 dirname    \
-        | sort -u              \
+        | sed 's|/[^/]*$||'    \
         | sed 's|^./||'        \
+        | LC_ALL=C sort -u     \
         > "${CACHE}"
 fi
 cat "${CACHE}"

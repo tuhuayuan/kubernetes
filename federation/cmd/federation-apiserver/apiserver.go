@@ -24,10 +24,11 @@ import (
 	"os"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apiserver/pkg/util/flag"
+	"k8s.io/apiserver/pkg/util/logs"
 	"k8s.io/kubernetes/federation/cmd/federation-apiserver/app"
-	genericoptions "k8s.io/kubernetes/pkg/genericapiserver/options"
-	"k8s.io/kubernetes/pkg/util"
-	"k8s.io/kubernetes/pkg/util/flag"
+	"k8s.io/kubernetes/federation/cmd/federation-apiserver/app/options"
 	"k8s.io/kubernetes/pkg/version/verflag"
 
 	"github.com/spf13/pflag"
@@ -36,16 +37,16 @@ import (
 func main() {
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	s := genericoptions.NewServerRunOptions()
+	s := options.NewServerRunOptions()
 	s.AddFlags(pflag.CommandLine)
 
 	flag.InitFlags()
-	util.InitLogs()
-	defer util.FlushLogs()
+	logs.InitLogs()
+	defer logs.FlushLogs()
 
 	verflag.PrintAndExitIfRequested()
 
-	if err := app.Run(s); err != nil {
+	if err := app.Run(s, wait.NeverStop); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}

@@ -21,24 +21,29 @@ package cadvisor
 import (
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/golang/glog"
 	"github.com/google/cadvisor/cache/memory"
-	cadvisorMetrics "github.com/google/cadvisor/container"
+	cadvisormetrics "github.com/google/cadvisor/container"
 	"github.com/google/cadvisor/events"
 	cadvisorfs "github.com/google/cadvisor/fs"
 	cadvisorhttp "github.com/google/cadvisor/http"
 	cadvisorapi "github.com/google/cadvisor/info/v1"
 	cadvisorapiv2 "github.com/google/cadvisor/info/v2"
 	"github.com/google/cadvisor/manager"
+	"github.com/google/cadvisor/metrics"
 	"github.com/google/cadvisor/utils/sysfs"
-	"k8s.io/kubernetes/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/kubernetes/pkg/kubelet/types"
 )
 
 type cadvisorClient struct {
-	runtime string
+	runtime  string
+	rootPath string
 	manager.Manager
 }
 
@@ -70,25 +75,43 @@ func init() {
 	}
 }
 
-// Creates a cAdvisor and exports its API on the specified port if port > 0.
-func New(port uint, runtime string) (Interface, error) {
-	sysFs, err := sysfs.NewRealSysFs()
-	if err != nil {
-		return nil, err
+func containerLabels(c *cadvisorapi.ContainerInfo) map[string]string {
+	set := map[string]string{metrics.LabelID: c.Name}
+	if len(c.Aliases) > 0 {
+		set[metrics.LabelName] = c.Aliases[0]
 	}
+	if image := c.Spec.Image; len(image) > 0 {
+		set[metrics.LabelImage] = image
+	}
+	if v, ok := c.Spec.Labels[types.KubernetesPodNameLabel]; ok {
+		set["pod_name"] = v
+	}
+	if v, ok := c.Spec.Labels[types.KubernetesPodNamespaceLabel]; ok {
+		set["namespace"] = v
+	}
+	if v, ok := c.Spec.Labels[types.KubernetesContainerNameLabel]; ok {
+		set["container_name"] = v
+	}
+	return set
+}
+
+// New creates a cAdvisor and exports its API on the specified port if port > 0.
+func New(address string, port uint, runtime string, rootPath string) (Interface, error) {
+	sysFs := sysfs.NewRealSysFs()
 
 	// Create and start the cAdvisor container manager.
-	m, err := manager.New(memory.New(statsCacheDuration, nil), sysFs, maxHousekeepingInterval, allowDynamicHousekeeping, cadvisorMetrics.MetricSet{cadvisorMetrics.NetworkTcpUsageMetrics: struct{}{}})
+	m, err := manager.New(memory.New(statsCacheDuration, nil), sysFs, maxHousekeepingInterval, allowDynamicHousekeeping, cadvisormetrics.MetricSet{cadvisormetrics.NetworkTcpUsageMetrics: struct{}{}}, http.DefaultClient)
 	if err != nil {
 		return nil, err
 	}
 
 	cadvisorClient := &cadvisorClient{
-		runtime: runtime,
-		Manager: m,
+		runtime:  runtime,
+		rootPath: rootPath,
+		Manager:  m,
 	}
 
-	err = cadvisorClient.exportHTTP(port)
+	err = cadvisorClient.exportHTTP(address, port)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +122,7 @@ func (cc *cadvisorClient) Start() error {
 	return cc.Manager.Start()
 }
 
-func (cc *cadvisorClient) exportHTTP(port uint) error {
+func (cc *cadvisorClient) exportHTTP(address string, port uint) error {
 	// Register the handlers regardless as this registers the prometheus
 	// collector properly.
 	mux := http.NewServeMux()
@@ -108,12 +131,12 @@ func (cc *cadvisorClient) exportHTTP(port uint) error {
 		return err
 	}
 
-	cadvisorhttp.RegisterPrometheusHandler(mux, cc, "/metrics", nil)
+	cadvisorhttp.RegisterPrometheusHandler(mux, cc, "/metrics", containerLabels)
 
 	// Only start the http server if port > 0
 	if port > 0 {
 		serv := &http.Server{
-			Addr:    fmt.Sprintf(":%d", port),
+			Addr:    net.JoinHostPort(address, strconv.Itoa(int(port))),
 			Handler: mux,
 		}
 
@@ -180,7 +203,7 @@ func (cc *cadvisorClient) ImagesFsInfo() (cadvisorapiv2.FsInfo, error) {
 }
 
 func (cc *cadvisorClient) RootFsInfo() (cadvisorapiv2.FsInfo, error) {
-	return cc.getFsInfo(cadvisorfs.LabelSystemRoot)
+	return cc.GetDirFsInfo(cc.rootPath)
 }
 
 func (cc *cadvisorClient) getFsInfo(label string) (cadvisorapiv2.FsInfo, error) {
@@ -201,4 +224,17 @@ func (cc *cadvisorClient) getFsInfo(label string) (cadvisorapiv2.FsInfo, error) 
 
 func (cc *cadvisorClient) WatchEvents(request *events.Request) (*events.EventChannel, error) {
 	return cc.WatchForEvents(request)
+}
+
+// HasDedicatedImageFs returns true if the imagefs has a dedicated device.
+func (cc *cadvisorClient) HasDedicatedImageFs() (bool, error) {
+	imageFsInfo, err := cc.ImagesFsInfo()
+	if err != nil {
+		return false, err
+	}
+	rootFsInfo, err := cc.RootFsInfo()
+	if err != nil {
+		return false, err
+	}
+	return imageFsInfo.Device != rootFsInfo.Device, nil
 }

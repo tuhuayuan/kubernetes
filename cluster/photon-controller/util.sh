@@ -156,7 +156,7 @@ function kube-up {
   verify-prereqs
   verify-ssh-prereqs
   verify-photon-config
-  ensure-temp-dir
+  kube::util::ensure-temp-dir
 
   find-release-tars
   find-image-id
@@ -284,7 +284,7 @@ function pc-create-vm {
 
    # Wait for the VM to be started and connected to the network
   have_network=0
-  for i in $(seq 120); do
+  for i in {1..120}; do
     # photon -n vm networks print several fields:
     # NETWORK MAC IP GATEWAY CONNECTED?
     # We wait until CONNECTED is True
@@ -1028,18 +1028,6 @@ function verify-cmd-in-path {
     kube::log::error "Can't find ${cmd} in PATH, please install and retry."
     exit 1
   }
-}
-
-#
-# Checks that KUBE_TEMP is set, or sets it
-# If it sets it, it also creates the temporary directory
-# and sets up a trap so that we delete it when we exit
-#
-function ensure-temp-dir {
-  if [[ -z ${KUBE_TEMP-} ]]; then
-    KUBE_TEMP=$(mktemp -d -t kubernetes.XXXXXX)
-    trap-add "rm -rf '${KUBE_TEMP}'" EXIT
-  fi
 }
 
 #

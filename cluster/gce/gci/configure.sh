@@ -54,6 +54,22 @@ for k,v in yaml.load(sys.stdin).iteritems():
   rm -f "${tmp_kube_env}"
 }
 
+function download-kube-master-certs {
+  # Fetch kube-env from GCE metadata server.
+  local -r tmp_kube_master_certs="/tmp/kube-master-certs.yaml"
+  curl --fail --retry 5 --retry-delay 3 --silent --show-error \
+    -H "X-Google-Metadata-Request: True" \
+    -o "${tmp_kube_master_certs}" \
+    http://metadata.google.internal/computeMetadata/v1/instance/attributes/kube-master-certs
+  # Convert the yaml format file into a shell-style file.
+  eval $(python -c '''
+import pipes,sys,yaml
+for k,v in yaml.load(sys.stdin).iteritems():
+  print("readonly {var}={value}".format(var = k, value = pipes.quote(str(v))))
+''' < "${tmp_kube_master_certs}" > "${KUBE_HOME}/kube-master-certs")
+  rm -f "${tmp_kube_master_certs}"
+}
+
 function validate-hash {
   local -r file="$1"
   local -r expected="$2"
@@ -98,8 +114,44 @@ function split-commas {
   echo $1 | tr "," "\n"
 }
 
+function install-gci-mounter-tools {
+  CONTAINERIZED_MOUNTER_HOME="${KUBE_HOME}/containerized_mounter"
+  mkdir -p "${CONTAINERIZED_MOUNTER_HOME}"
+  chmod a+x "${CONTAINERIZED_MOUNTER_HOME}"
+  mkdir -p "${CONTAINERIZED_MOUNTER_HOME}/rootfs"
+  local -r mounter_tar_sha="8003b798cf33c7f91320cd6ee5cec4fa22244571"
+  download-or-bust "${mounter_tar_sha}" "https://storage.googleapis.com/kubernetes-release/gci-mounter/mounter.tar"
+  cp "${dst_dir}/kubernetes/gci-trusty/gci-mounter" "${CONTAINERIZED_MOUNTER_HOME}/mounter"
+  chmod a+x "${CONTAINERIZED_MOUNTER_HOME}/mounter"
+  mv "${KUBE_HOME}/mounter.tar" /tmp/mounter.tar
+  tar xvf /tmp/mounter.tar -C "${CONTAINERIZED_MOUNTER_HOME}/rootfs"
+  rm /tmp/mounter.tar
+  mkdir -p "${CONTAINERIZED_MOUNTER_HOME}/rootfs/var/lib/kubelet"
+}
+
+# Install node problem detector binary.
+function install-node-problem-detector {
+  if [[ -n "${NODE_PROBLEM_DETECTOR_VERSION:-}" ]]; then
+      local -r npd_version="${NODE_PROBLEM_DETECTOR_VERSION}"
+      local -r npd_sha1="${NODE_PROBLEM_DETECTOR_TAR_HASH}"
+  else
+      local -r npd_version="v0.4.1"
+      local -r npd_sha1="a57a3fe64cab8a18ec654f5cef0aec59dae62568"
+  fi
+  local -r npd_release_path="https://storage.googleapis.com/kubernetes-release"
+  local -r npd_tar="node-problem-detector-${npd_version}.tar.gz"
+  download-or-bust "${npd_sha1}" "${npd_release_path}/node-problem-detector/${npd_tar}"
+  local -r npd_dir="${KUBE_HOME}/node-problem-detector"
+  mkdir -p "${npd_dir}"
+  tar xzf "${KUBE_HOME}/${npd_tar}" -C "${npd_dir}" --overwrite
+  mv "${npd_dir}/bin"/* "${KUBE_HOME}/bin"
+  chmod a+x "${KUBE_HOME}/bin/node-problem-detector"
+  rmdir "${npd_dir}/bin"
+  rm -f "${KUBE_HOME}/${npd_tar}"
+}
+
 # Downloads kubernetes binaries and kube-system manifest tarball, unpacks them,
-# and places them into suitable directories. Files are placed in /home/kubernetes. 
+# and places them into suitable directories. Files are placed in /home/kubernetes.
 function install-kube-binary-config {
   cd "${KUBE_HOME}"
   local -r server_binary_tar_urls=( $(split-commas "${SERVER_BINARY_TAR_URL}") )
@@ -121,6 +173,9 @@ function install-kube-binary-config {
   cp "${src_dir}/"*.docker_tag "${dst_dir}"
   if [[ "${KUBERNETES_MASTER:-}" == "false" ]]; then
     cp "${src_dir}/kube-proxy.tar" "${dst_dir}"
+    if [[ "${ENABLE_NODE_PROBLEM_DETECTOR:-}" == "standalone" ]]; then
+      install-node-problem-detector
+    fi
   else
     cp "${src_dir}/kube-apiserver.tar" "${dst_dir}"
     cp "${src_dir}/kube-controller-manager.tar" "${dst_dir}"
@@ -128,39 +183,25 @@ function install-kube-binary-config {
     cp -r "${KUBE_HOME}/kubernetes/addons" "${dst_dir}"
   fi
   local -r kube_bin="${KUBE_HOME}/bin"
-  # If the built-in binary version is different from the expected version, we use
-  # the downloaded binary. The simplest implementation is to always use the downloaded
-  # binary without checking the version. But we have another version guardian in GKE.
-  # So, we compare the versions to ensure this run-time binary replacement is only
-  # applied for OSS kubernetes.
-  cp "${src_dir}/kubelet" "${kube_bin}"
-  local -r builtin_version="$(/usr/bin/kubelet --version=true | cut -f2 -d " ")"
-  local -r required_version="$(/home/kubernetes/bin/kubelet --version=true | cut -f2 -d " ")"
-  if [[ "${TEST_CLUSTER:-}" == "true" ]] || \
-     [[ "${builtin_version}" != "${required_version}" ]]; then
-    cp "${src_dir}/kubectl" "${kube_bin}"
-    chmod 755 "${kube_bin}/kubelet"
-    chmod 755 "${kube_bin}/kubectl"
-    mount --bind "${kube_bin}/kubelet" /usr/bin/kubelet
-    mount --bind "${kube_bin}/kubectl" /usr/bin/kubectl
-  else
-    rm -f "${kube_bin}/kubelet"
-  fi
+  mv "${src_dir}/kubelet" "${kube_bin}"
+  mv "${src_dir}/kubectl" "${kube_bin}"
+
   if [[ "${NETWORK_PROVIDER:-}" == "kubenet" ]] || \
      [[ "${NETWORK_PROVIDER:-}" == "cni" ]]; then
     #TODO(andyzheng0831): We should make the cni version number as a k8s env variable.
-    local -r cni_tar="cni-8a936732094c0941e1543ef5d292a1f4fffa1ac5.tar.gz"
-    download-or-bust "" "https://storage.googleapis.com/kubernetes-release/network-plugins/${cni_tar}"
-    tar xzf "${KUBE_HOME}/${cni_tar}" -C "${kube_bin}" --overwrite
-    mv "${kube_bin}/bin"/* "${kube_bin}"
-    rmdir "${kube_bin}/bin"
+    local -r cni_tar="cni-0799f5732f2a11b329d9e3d51b9c8f2e3759f2ff.tar.gz"
+    local -r cni_sha1="1d9788b0f5420e1a219aad2cb8681823fc515e7c"
+    download-or-bust "${cni_sha1}" "https://storage.googleapis.com/kubernetes-release/network-plugins/${cni_tar}"
+    local -r cni_dir="${KUBE_HOME}/cni"
+    mkdir -p "${cni_dir}"
+    tar xzf "${KUBE_HOME}/${cni_tar}" -C "${cni_dir}" --overwrite
+    mv "${cni_dir}/bin"/* "${kube_bin}"
+    rmdir "${cni_dir}/bin"
     rm -f "${KUBE_HOME}/${cni_tar}"
   fi
 
-  cp "${KUBE_HOME}/kubernetes/LICENSES" "${KUBE_HOME}"
-  cp "${KUBE_HOME}/kubernetes/kubernetes-src.tar.gz" "${KUBE_HOME}"
-  chmod a+r "${KUBE_HOME}/kubernetes/LICENSES"
-  chmod a+r "${KUBE_HOME}/kubernetes/kubernetes-src.tar.gz"
+  mv "${KUBE_HOME}/kubernetes/LICENSES" "${KUBE_HOME}"
+  mv "${KUBE_HOME}/kubernetes/kubernetes-src.tar.gz" "${KUBE_HOME}"
 
   # Put kube-system pods manifests in ${KUBE_HOME}/kube-manifests/.
   dst_dir="${KUBE_HOME}/kube-manifests"
@@ -186,9 +227,11 @@ function install-kube-binary-config {
   fi
   cp "${dst_dir}/kubernetes/gci-trusty/gci-configure-helper.sh" "${KUBE_HOME}/bin/configure-helper.sh"
   cp "${dst_dir}/kubernetes/gci-trusty/health-monitor.sh" "${KUBE_HOME}/bin/health-monitor.sh"
-  chmod 544 "${KUBE_HOME}/bin/configure-helper.sh"
-  chmod 544 "${KUBE_HOME}/bin/health-monitor.sh"
+  chmod -R 755 "${kube_bin}"
 
+  # Install gci mounter related artifacts to allow mounting storage volumes in GCI
+  install-gci-mounter-tools
+  
   # Clean up.
   rm -rf "${KUBE_HOME}/kubernetes"
   rm -f "${KUBE_HOME}/${server_binary_tar}"
@@ -197,12 +240,15 @@ function install-kube-binary-config {
   rm -f "${KUBE_HOME}/${manifests_tar}.sha1"
 }
 
-
 ######### Main Function ##########
 echo "Start to install kubernetes files"
 set-broken-motd
 KUBE_HOME="/home/kubernetes"
 download-kube-env
 source "${KUBE_HOME}/kube-env"
+if [[ "${KUBERNETES_MASTER:-}" == "true" ]]; then
+  download-kube-master-certs
+fi
 install-kube-binary-config
 echo "Done for installing kubernetes files"
+

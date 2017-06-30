@@ -17,12 +17,12 @@ limitations under the License.
 package capabilities
 
 import (
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/util/validation/field"
 )
 
-// CapabilitiesStrategy defines the interface for all cap constraint strategies.
-type CapabilitiesStrategy interface {
+// Strategy defines the interface for all cap constraint strategies.
+type Strategy interface {
 	// Generate creates the capabilities based on policy rules.
 	Generate(pod *api.Pod, container *api.Container) (*api.Capabilities, error)
 	// Validate ensures that the specified values fall within the range of the strategy.

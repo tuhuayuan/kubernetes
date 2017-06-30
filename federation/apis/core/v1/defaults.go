@@ -17,13 +17,10 @@ limitations under the License.
 package v1
 
 import (
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/kubernetes/pkg/api/v1"
-	"k8s.io/kubernetes/pkg/runtime"
 )
 
-func addDefaultingFuncs(scheme *runtime.Scheme) {
-	scheme.AddDefaultingFuncs(
-		v1.SetDefaults_ServiceSpec,
-		v1.SetDefaults_NamespaceStatus,
-	)
+func addDefaultingFuncs(scheme *runtime.Scheme) error {
+	return v1.RegisterDefaults(scheme)
 }

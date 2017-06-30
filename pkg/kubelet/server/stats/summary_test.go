@@ -25,9 +25,9 @@ import (
 	fuzz "github.com/google/gofuzz"
 	"github.com/stretchr/testify/assert"
 
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	kubestats "k8s.io/kubernetes/pkg/kubelet/api/v1alpha1/stats"
+	k8sv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubestats "k8s.io/kubernetes/pkg/kubelet/apis/stats/v1alpha1"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
 	"k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/leaky"
@@ -54,7 +54,7 @@ var (
 )
 
 func TestBuildSummary(t *testing.T) {
-	node := api.Node{}
+	node := k8sv1.Node{}
 	node.Name = "FooNode"
 	nodeConfig := cm.NodeConfig{
 		RuntimeCgroupsName: "/docker-daemon",
@@ -93,9 +93,11 @@ func TestBuildSummary(t *testing.T) {
 		rootfsCapacity    = uint64(10000000)
 		rootfsAvailable   = uint64(5000000)
 		rootfsInodesFree  = uint64(1000)
+		rootfsInodes      = uint64(2000)
 		imagefsCapacity   = uint64(20000000)
 		imagefsAvailable  = uint64(8000000)
 		imagefsInodesFree = uint64(2000)
+		imagefsInodes     = uint64(4000)
 	)
 
 	prf0 := kubestats.PodReference{Name: pName0, Namespace: namespace0, UID: "UID" + pName0}
@@ -118,15 +120,21 @@ func TestBuildSummary(t *testing.T) {
 		"/pod2-c0": summaryTestContainerInfo(seedPod2Container, pName2, namespace2, cName20),
 	}
 
+	freeRootfsInodes := rootfsInodesFree
+	totalRootfsInodes := rootfsInodes
 	rootfs := v2.FsInfo{
 		Capacity:   rootfsCapacity,
 		Available:  rootfsAvailable,
-		InodesFree: rootfsInodesFree,
+		InodesFree: &freeRootfsInodes,
+		Inodes:     &totalRootfsInodes,
 	}
+	freeImagefsInodes := imagefsInodesFree
+	totalImagefsInodes := imagefsInodes
 	imagefs := v2.FsInfo{
 		Capacity:   imagefsCapacity,
 		Available:  imagefsAvailable,
-		InodesFree: imagefsInodesFree,
+		InodesFree: &freeImagefsInodes,
+		Inodes:     &totalImagefsInodes,
 	}
 
 	// memory limit overrides for each container (used to test available bytes if a memory limit is known)
@@ -175,8 +183,8 @@ func TestBuildSummary(t *testing.T) {
 		assert.EqualValues(t, testTime(creationTime, seed).Unix(), sys.StartTime.Time.Unix(), name+".StartTime")
 		checkCPUStats(t, name, seed, sys.CPU)
 		checkMemoryStats(t, name, seed, info, sys.Memory)
-		checkFsStats(t, rootfsCapacity, rootfsAvailable, rootfsInodesFree, sys.Logs)
-		checkFsStats(t, imagefsCapacity, imagefsAvailable, imagefsInodesFree, sys.Rootfs)
+		assert.Nil(t, sys.Logs, name+".Logs")
+		assert.Nil(t, sys.Rootfs, name+".Rootfs")
 	}
 
 	assert.Equal(t, 3, len(summary.Pods))
@@ -368,10 +376,11 @@ func checkMemoryStats(t *testing.T, label string, seed int, info v2.ContainerInf
 	}
 }
 
-func checkFsStats(t *testing.T, capacity uint64, Available uint64, inodesFree uint64, fs *kubestats.FsStats) {
+func checkFsStats(t *testing.T, capacity uint64, Available uint64, inodes uint64, inodesFree uint64, fs *kubestats.FsStats) {
 	assert.EqualValues(t, capacity, *fs.CapacityBytes)
 	assert.EqualValues(t, Available, *fs.AvailableBytes)
 	assert.EqualValues(t, inodesFree, *fs.InodesFree)
+	assert.EqualValues(t, inodes, *fs.Inodes)
 }
 
 func TestCustomMetrics(t *testing.T) {
@@ -431,7 +440,7 @@ func TestCustomMetrics(t *testing.T) {
 				Type:  kubestats.MetricGauge,
 				Units: "per second",
 			},
-			Time:  unversioned.NewTime(timestamp2),
+			Time:  metav1.NewTime(timestamp2),
 			Value: 100,
 		},
 		kubestats.UserDefinedMetric{
@@ -440,7 +449,7 @@ func TestCustomMetrics(t *testing.T) {
 				Type:  kubestats.MetricCumulative,
 				Units: "count",
 			},
-			Time:  unversioned.NewTime(timestamp2),
+			Time:  metav1.NewTime(timestamp2),
 			Value: 2.1,
 		})
 }

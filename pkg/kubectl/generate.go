@@ -24,8 +24,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"k8s.io/kubernetes/pkg/runtime"
-	utilerrors "k8s.io/kubernetes/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 )
 
 // GeneratorParam is a parameter for a generator
@@ -35,7 +35,9 @@ type GeneratorParam struct {
 	Required bool
 }
 
-// Generator is an interface for things that can generate API objects from input parameters.
+// Generator is an interface for things that can generate API objects from input
+// parameters. One example is the "expose" generator that is capable of exposing
+// new replication controllers and services, among other things.
 type Generator interface {
 	// Generate creates an API object given a set of parameters
 	Generate(params map[string]interface{}) (runtime.Object, error)

@@ -1,37 +1,3 @@
-<!-- BEGIN MUNGE: UNVERSIONED_WARNING -->
-
-<!-- BEGIN STRIP_FOR_RELEASE -->
-
-<img src="http://kubernetes.io/kubernetes/img/warning.png" alt="WARNING"
-     width="25" height="25">
-<img src="http://kubernetes.io/kubernetes/img/warning.png" alt="WARNING"
-     width="25" height="25">
-<img src="http://kubernetes.io/kubernetes/img/warning.png" alt="WARNING"
-     width="25" height="25">
-<img src="http://kubernetes.io/kubernetes/img/warning.png" alt="WARNING"
-     width="25" height="25">
-<img src="http://kubernetes.io/kubernetes/img/warning.png" alt="WARNING"
-     width="25" height="25">
-
-<h2>PLEASE NOTE: This document applies to the HEAD of the source tree</h2>
-
-If you are using a released version of Kubernetes, you should
-refer to the docs that go with that version.
-
-<!-- TAG RELEASE_LINK, added by the munger automatically -->
-<strong>
-The latest release of this document can be found
-[here](http://releases.k8s.io/release-1.3/examples/phabricator/README.md).
-
-Documentation for other releases can be found at
-[releases.k8s.io](http://releases.k8s.io).
-</strong>
---
-
-<!-- END STRIP_FOR_RELEASE -->
-
-<!-- END MUNGE: UNVERSIONED_WARNING -->
-
 ## Phabricator example
 
 This example shows how to build a simple multi-tier web application using Kubernetes and Docker.
@@ -40,7 +6,7 @@ The example combines a web frontend and an external service that provides MySQL 
 
 ### Step Zero: Prerequisites
 
-This example assumes that you have a basic understanding of kubernetes [services](../../docs/user-guide/services.md) and that you have forked the repository and [turned up a Kubernetes cluster](../../docs/getting-started-guides/):
+This example assumes that you have a basic understanding of kubernetes [services](https://kubernetes.io/docs/user-guide/services.md) and that you have forked the repository and [turned up a Kubernetes cluster](https://kubernetes.io/docs/getting-started-guides/):
 
 ```sh
 $ cd kubernetes
@@ -75,7 +41,7 @@ Raw MySQL Error: Attempt to connect to root@1.2.3.4 failed with error
 
 ### Step Three: Turn up the phabricator
 
-To start Phabricator server use the file [`examples/phabricator/phabricator-controller.json`](phabricator-controller.json) which describes a [replication controller](../../docs/user-guide/replication-controller.md) with a single [pod](../../docs/user-guide/pods.md) running an Apache server with Phabricator PHP source:
+To start Phabricator server use the file [`examples/phabricator/phabricator-controller.json`](phabricator-controller.json) which describes a [replication controller](https://kubernetes.io/docs/user-guide/replication-controller.md) with a single [pod](https://kubernetes.io/docs/user-guide/pods.md) running an Apache server with Phabricator PHP source:
 
 <!-- BEGIN MUNGE: EXAMPLE phabricator-controller.json -->
 
@@ -160,7 +126,7 @@ phabricator-controller-9vy68   1/1       Running   0          1m
 If you ssh to that machine, you can run `docker ps` to see the actual pod:
 
 ```sh
-me@workstation$ gcloud compute ssh --zone us-central1-b kubernetes-minion-2
+me@workstation$ gcloud compute ssh --zone us-central1-b kubernetes-node-2
 
 $ sudo docker ps
 CONTAINER ID        IMAGE                             COMMAND     CREATED       STATUS      PORTS   NAMES
@@ -171,7 +137,7 @@ CONTAINER ID        IMAGE                             COMMAND     CREATED       
 
 ### Step Four: Turn up the phabricator service
 
-A Kubernetes 'service' is a named load balancer that proxies traffic to one or more containers. The services in a Kubernetes cluster are discoverable inside other containers via *environment variables*. Services find the containers to load balance based on pod labels.  These environment variables are typically referenced in application code, shell scripts, or other places where one node needs to talk to another in a distributed system.  You should catch up on [kubernetes services](../../docs/user-guide/services.md) before proceeding.
+A Kubernetes 'service' is a named load balancer that proxies traffic to one or more containers. The services in a Kubernetes cluster are discoverable inside other containers via *environment variables*. Services find the containers to load balance based on pod labels.  These environment variables are typically referenced in application code, shell scripts, or other places where one node needs to talk to another in a distributed system.  You should catch up on [kubernetes services](https://kubernetes.io/docs/user-guide/services.md) before proceeding.
 
 The pod that you created in Step Three has the label `name=phabricator`. The selector field of the service determines which pods will receive the traffic sent to the service.
 
@@ -230,10 +196,10 @@ and then visit port 80 of that IP address.
 
 **Note**: Provisioning of the external IP address may take few minutes.
 
-**Note**: You may need to open the firewall for port 80 using the [console][cloud-console] or the `gcloud` tool. The following command will allow traffic from any source to instances tagged `kubernetes-minion`:
+**Note**: You may need to open the firewall for port 80 using the [console][cloud-console] or the `gcloud` tool. The following command will allow traffic from any source to instances tagged `kubernetes-node`:
 
 ```sh
-$ gcloud compute firewall-rules create phabricator-node-80 --allow=tcp:80 --target-tags kubernetes-minion
+$ gcloud compute firewall-rules create phabricator-node-80 --allow=tcp:80 --target-tags kubernetes-node
 ```
 
 ### Step Six: Cleanup

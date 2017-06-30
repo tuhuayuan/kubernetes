@@ -27,8 +27,8 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	k8sRuntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/kubernetes/pkg/util/goroutinemap/exponentialbackoff"
-	k8sRuntime "k8s.io/kubernetes/pkg/util/runtime"
 )
 
 const (
@@ -40,10 +40,15 @@ const (
 
 	// maxDurationBeforeRetry is the maximum amount of time that
 	// durationBeforeRetry will grow to due to exponential backoff.
-	maxDurationBeforeRetry = 2 * time.Minute
+	// Value is slightly offset from 2 minutes to make timeouts due to this
+	// constant recognizable.
+	maxDurationBeforeRetry = 2*time.Minute + 1*time.Second
 )
 
-// GoRoutineMap defines the supported set of operations.
+// GoRoutineMap defines a type that can run named goroutines and track their
+// state.  It prevents the creation of multiple goroutines with the same name
+// and may prevent recreation of a goroutine until after the a backoff time
+// has elapsed after the last goroutine with that name finished.
 type GoRoutineMap interface {
 	// Run adds operation name to the list of running operations and spawns a
 	// new go routine to execute the operation.
@@ -54,10 +59,19 @@ type GoRoutineMap interface {
 	// a new operation to be started with the same operation name without error.
 	Run(operationName string, operationFunc func() error) error
 
-	// Wait blocks until all operations are completed. This is typically
+	// Wait blocks until operations map is empty. This is typically
 	// necessary during tests - the test should wait until all operations finish
 	// and evaluate results after that.
 	Wait()
+
+	// WaitForCompletion blocks until either all operations have successfully completed
+	// or have failed but are not pending. The test should wait until operations are either
+	// complete or have failed.
+	WaitForCompletion()
+
+	// IsOperationPending returns true if the operation is pending (currently
+	// running), otherwise returns false.
+	IsOperationPending(operationName string) bool
 }
 
 // NewGoRoutineMap returns a new instance of GoRoutineMap.
@@ -75,9 +89,10 @@ type goRoutineMap struct {
 	operations                map[string]operation
 	exponentialBackOffOnError bool
 	cond                      *sync.Cond
-	lock                      sync.Mutex
+	lock                      sync.RWMutex
 }
 
+// operation holds the state of a single goroutine.
 type operation struct {
 	operationPending bool
 	expBackoff       exponentialbackoff.ExponentialBackoff
@@ -118,6 +133,8 @@ func (grm *goRoutineMap) Run(
 	return nil
 }
 
+// operationComplete handles the completion of a goroutine run in the
+// goRoutineMap.
 func (grm *goRoutineMap) operationComplete(
 	operationName string, err *error) {
 	// Defer operations are executed in Last-In is First-Out order. In this case
@@ -150,6 +167,16 @@ func (grm *goRoutineMap) operationComplete(
 	}
 }
 
+func (grm *goRoutineMap) IsOperationPending(operationName string) bool {
+	grm.lock.RLock()
+	defer grm.lock.RUnlock()
+	existingOp, exists := grm.operations[operationName]
+	if exists && existingOp.operationPending {
+		return true
+	}
+	return false
+}
+
 func (grm *goRoutineMap) Wait() {
 	grm.lock.Lock()
 	defer grm.lock.Unlock()
@@ -157,6 +184,32 @@ func (grm *goRoutineMap) Wait() {
 	for len(grm.operations) > 0 {
 		grm.cond.Wait()
 	}
+}
+
+func (grm *goRoutineMap) WaitForCompletion() {
+	grm.lock.Lock()
+	defer grm.lock.Unlock()
+
+	for {
+		if len(grm.operations) == 0 || grm.nothingPending() {
+			break
+		} else {
+			grm.cond.Wait()
+		}
+	}
+}
+
+// Check if any operation is pending. Already assumes caller has the
+// necessary locks
+func (grm *goRoutineMap) nothingPending() bool {
+	nothingIsPending := true
+	for _, operation := range grm.operations {
+		if operation.operationPending {
+			nothingIsPending = false
+			break
+		}
+	}
+	return nothingIsPending
 }
 
 // NewAlreadyExistsError returns a new instance of AlreadyExists error.

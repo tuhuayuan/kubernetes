@@ -17,12 +17,28 @@ limitations under the License.
 package api
 
 import (
-	"k8s.io/kubernetes/pkg/api/unversioned"
-	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/runtime/serializer"
+	"os"
+
+	"k8s.io/apimachinery/pkg/apimachinery/announced"
+	"k8s.io/apimachinery/pkg/apimachinery/registered"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 )
 
+// GroupFactoryRegistry is the APIGroupFactoryRegistry (overlaps a bit with Registry, see comments in package for details)
+var GroupFactoryRegistry = make(announced.APIGroupFactoryRegistry)
+
+// Registry is an instance of an API registry.  This is an interim step to start removing the idea of a global
+// API registry.
+var Registry = registered.NewOrDie(os.Getenv("KUBE_API_VERSIONS"))
+
 // Scheme is the default instance of runtime.Scheme to which types in the Kubernetes API are already registered.
+// NOTE: If you are copying this file to start a new api group, STOP! Copy the
+// extensions group instead. This Scheme is special and should appear ONLY in
+// the api group, unless you really know what you're doing.
+// TODO(lavalamp): make the above error impossible.
 var Scheme = runtime.NewScheme()
 
 // Codecs provides access to encoding and decoding for the scheme
@@ -32,28 +48,29 @@ var Codecs = serializer.NewCodecFactory(Scheme)
 const GroupName = ""
 
 // SchemeGroupVersion is group version used to register these objects
-var SchemeGroupVersion = unversioned.GroupVersion{Group: GroupName, Version: runtime.APIVersionInternal}
-
-// Unversioned is group version for unversioned API objects
-// TODO: this should be v1 probably
-var Unversioned = unversioned.GroupVersion{Group: "", Version: "v1"}
+var SchemeGroupVersion = schema.GroupVersion{Group: GroupName, Version: runtime.APIVersionInternal}
 
 // ParameterCodec handles versioning of objects that are converted to query parameters.
 var ParameterCodec = runtime.NewParameterCodec(Scheme)
 
-// Kind takes an unqualified kind and returns back a Group qualified GroupKind
-func Kind(kind string) unversioned.GroupKind {
+// Kind takes an unqualified kind and returns a Group qualified GroupKind
+func Kind(kind string) schema.GroupKind {
 	return SchemeGroupVersion.WithKind(kind).GroupKind()
 }
 
-// Resource takes an unqualified resource and returns back a Group qualified GroupResource
-func Resource(resource string) unversioned.GroupResource {
+// Resource takes an unqualified resource and returns a Group qualified GroupResource
+func Resource(resource string) schema.GroupResource {
 	return SchemeGroupVersion.WithResource(resource).GroupResource()
 }
 
-func AddToScheme(scheme *runtime.Scheme) {
-	if err := Scheme.AddIgnoredConversionType(&unversioned.TypeMeta{}, &unversioned.TypeMeta{}); err != nil {
-		panic(err)
+var (
+	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
+	AddToScheme   = SchemeBuilder.AddToScheme
+)
+
+func addKnownTypes(scheme *runtime.Scheme) error {
+	if err := scheme.AddIgnoredConversionType(&metav1.TypeMeta{}, &metav1.TypeMeta{}); err != nil {
+		return err
 	}
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&Pod{},
@@ -89,11 +106,10 @@ func AddToScheme(scheme *runtime.Scheme) {
 		&PersistentVolumeList{},
 		&PersistentVolumeClaim{},
 		&PersistentVolumeClaimList{},
-		&DeleteOptions{},
-		&ListOptions{},
 		&PodAttachOptions{},
 		&PodLogOptions{},
 		&PodExecOptions{},
+		&PodPortForwardOptions{},
 		&PodProxyOptions{},
 		&ComponentStatus{},
 		&ComponentStatusList{},
@@ -103,13 +119,5 @@ func AddToScheme(scheme *runtime.Scheme) {
 		&ConfigMapList{},
 	)
 
-	// Register Unversioned types under their own special group
-	Scheme.AddUnversionedTypes(Unversioned,
-		&unversioned.ExportOptions{},
-		&unversioned.Status{},
-		&unversioned.APIVersions{},
-		&unversioned.APIGroupList{},
-		&unversioned.APIGroup{},
-		&unversioned.APIResourceList{},
-	)
+	return nil
 }
